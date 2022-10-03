@@ -1,0 +1,128 @@
+app-id: io.keyboard.Chrysalis
+runtime: org.freedesktop.Platform
+runtime-version: "22.08"
+sdk: org.freedesktop.Sdk
+base: org.electronjs.Electron2.BaseApp
+base-version: "22.08"
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.node16
+separate-locales: false
+command: launcher.sh
+finish-args:
+  # Chrysalis requires serial console access in order to update firmware and program keyboards.
+  - --device=all
+
+  # Chrysalis can export and import keyboard layers to files, so permissions to the download directory are provided.
+  - --filesystem=xdg-download
+
+  - --device=dri
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --share=network
+modules:
+  - name: yarn
+    buildsystem: simple
+    build-commands:
+      - cp -a * /app
+    cleanup:
+      - "*"
+    sources:
+      - type: archive
+        url: https://github.com/yarnpkg/yarn/releases/download/v1.22.19/yarn-v1.22.19.tar.gz
+        sha256: 732620bac8b1690d507274f025f3c6cfdc3627a84d9642e38a07452cc00e0f2e
+        x-checker-data:
+          type: anitya
+          project-id: 13363
+          url-template: https://github.com/yarnpkg/yarn/releases/download/$version/yarn-v$version.tar.gz
+  - "shared-modules/libusb/libusb.json"
+  - name: dfu-util
+    buildsystem: autotools
+    sources:
+      - type: archive
+        url: https://dfu-util.sourceforge.net/releases/dfu-util-0.11.tar.gz
+        sha256: b4b53ba21a82ef7e3d4c47df2952adf5fa494f499b6b0b57c58c5d04ae8ff19e
+        x-checker-data:
+          type: anitya
+          project-id: 10195
+          url-template: https://dfu-util.sourceforge.net/releases/dfu-util-$version.tar.gz
+  - name: avrdude
+    buildsystem: autotools
+    cleanup:
+      - /include
+      - /lib
+    sources:
+      - type: archive
+        url: https://download.savannah.gnu.org/releases/avrdude/avrdude-7.0.tar.gz
+        sha256: c0ef65d98d6040ca0b4f2b700d51463c2a1f94665441f39d15d97442dbb79b54
+        x-checker-data:
+          type: anitya
+          project-id: 10751
+          url-template: https://download.savannah.gnu.org/releases/avrdude/avrdude-$version.tar.gz
+  - name: chrysalis
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/node16/bin:/app/yarn/bin
+      env:
+        DEBUG: electron-builder
+        XDG_CACHE_HOME: /run/build/chrysalis/flatpak-node/cache
+        NPM_CONFIG_LOGLEVEL: info
+        npm_config_cache: /run/build/chrysalis/flatpak-node/npm-cache
+        npm_config_offline: "true"
+        npm_config_no_save: "true"
+        NODE_OPTIONS: --openssl-legacy-provider
+        # Have node-usb use the libusb library provided by the Flatpak.
+        GYP_DEFINES: "use_system_libusb=true use_udev=0"
+        # https://stackoverflow.com/questions/25146976/can-i-get-npm-gyp-to-use-ccache
+        CXX: ccache g++
+        CC: ccache gcc
+    cleanup:
+      - /main/chrysalis
+      - /main/resources/static/dfu-util
+    subdir: main
+    sources:
+      - type: git
+        # url: "https://github.com/keyboardio/Chrysalis.git"
+        url: "https://github.com/jwillikers/Chrysalis.git"
+        # todo Change to master when merging.
+        branch: flatpak
+        dest: main
+        x-checker-data:
+          type: git
+          tag-pattern: ^v([\\d.]+)$
+          version-scheme: semantic
+      - generated-sources.json
+      - type: script
+        dest-filename: launcher.sh
+        commands:
+          # The sandbox prevents access to the serial devices which are under /dev
+          - export ZYPAK_DISABLE_SANDBOX=1
+          - if test -n "$WAYLAND_DISPLAY" && test -e "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"; then set -- --enable-features=UseOzonePlatform --ozone-platform=wayland "$@"; fi
+          - zypak-wrapper.sh /app/main/chrysalis-bin "$@"
+    build-commands:
+      - jq '.build.linux.target="dir"' <<<$(<package.json) > package.json
+
+      - HOME=$PWD yarn config --offline set yarn-offline-mirror $FLATPAK_BUILDER_BUILDDIR/flatpak-node/yarn-mirror
+
+      - |
+        ln -s $XDG_CACHE_HOME/node-gyp $HOME/.electron-gyp
+        yarn --offline --cwd /run/build/chrysalis/main
+
+      - |
+        ln -s $XDG_CACHE_HOME/node-gyp $HOME/.electron-gyp
+        HOME=$PWD yarn --offline --cwd /run/build/chrysalis/main compile --offline
+
+      - |
+        ln -s $XDG_CACHE_HOME/node-gyp $HOME/.electron-gyp
+        . ../flatpak-node/electron-builder-arch-args.sh
+        yarn --offline run electron-builder --linux $ELECTRON_BUILDER_ARCH_ARGS
+
+      - cp -r dist/linux*unpacked /app/main
+      - install -Dm 755 -t /app/bin/ ../launcher.sh
+      - install -Dm 644 build/io.keyboard.Chrysalis.desktop /app/share/applications/$FLATPAK_ID.desktop
+      - install -Dm 644 build/io.keyboard.Chrysalis.metainfo.xml /app/share/metainfo/$FLATPAK_ID.metainfo.xml
+      - for size in 64 128; do [[ -e "build/icon-${size}x${size}.png" ]] && install
+        -Dm644 "build/icon-${size}x${size}.png" "/app/share/icons/hicolor/${size}x${size}/apps/${FLATPAK_ID}.png";
+        done
+      - install -Dm 644 build/icon.png /app/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
