@@ -1,0 +1,14 @@
+# Editor
+*.swp
+.vscode/
+
+# Flatpak
+.flatpak-builder/
+build-dir/
+flatpak-dotnet-generator.py
+flatpak-builder-tools/
+repo/
+
+# Libation source repository
+Libation/
+libation/

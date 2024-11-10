@@ -1,0 +1,62 @@
+id: com.getlibation.Libation
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.dotnet8
+build-options:
+  prepend-path: "/usr/lib/sdk/dotnet8/bin"
+  append-ld-library-path: "/usr/lib/sdk/dotnet8/lib"
+  prepend-pkg-config-path: "/usr/lib/sdk/dotnet8/lib/pkgconfig"
+command: Libation
+finish-args:
+  # Libation defaults to using the ~/Libation directory without accessing it through a portal.
+  # This is created and mapped here to avoid accidentally storing data inside the Flatpak.
+  - --filesystem=~/Libation:create
+  - --device=dri
+  - --socket=x11
+  - --share=ipc
+  - --share=network
+  - --env=DOTNET_ROOT=/app/lib/dotnet
+modules:
+  - name: dotnet
+    buildsystem: simple
+    build-commands:
+      - /usr/lib/sdk/dotnet8/bin/install.sh
+  - name: libation
+    buildsystem: simple
+    build-options:
+      env:
+        DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      arch:
+        aarch64:
+          env:
+            RUNTIME: linux-arm64
+        x86_64:
+          env:
+            RUNTIME: linux-x64
+    build-commands:
+      - install -D Source/LoadByOS/LinuxConfigApp/Libation.desktop ${FLATPAK_DEST}/share/applications/$FLATPAK_ID.desktop
+      - sed --in-place 's|/usr/bin/libation|/app/bin/Libation|' ${FLATPAK_DEST}/share/applications/$FLATPAK_ID.desktop
+      - sed --in-place 's|Icon=libation|Icon=com.getlibation.Libation|' ${FLATPAK_DEST}/share/applications/$FLATPAK_ID.desktop
+      - install -D Source/LoadByOS/LinuxConfigApp/libation_glass.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/$FLATPAK_ID.svg
+      - install -D --target-directory=${FLATPAK_DEST}/share/metainfo Source/LoadByOS/LinuxConfigApp/$FLATPAK_ID.metainfo.xml
+      - mkdir --parents ${FLATPAK_DEST}/bin
+      - dotnet publish
+        Source/LibationAvalonia/LibationAvalonia.csproj
+        -c Release
+        --no-self-contained
+        --output="$FLATPAK_DEST/bin"
+        -p:PublishProfile=LibationAvalonia/Properties/PublishProfiles/LinuxProfile.pubxml
+        --runtime $RUNTIME
+        --source ./nuget-sources
+    sources:
+      - nuget-sources-aarch64.json
+      - nuget-sources-x86_64.json
+      - type: git
+        url: https://github.com/rmcrackan/Libation.git
+        commit: ed87ded77afa9684e7aec34608e57eab15405ba2
+        tag: v11.5.4
+        x-checker-data:
+          type: git
+          tag-pattern: ^v([\d.]+)$
